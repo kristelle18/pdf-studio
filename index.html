@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PDF Studio — free PDF editor in your browser</title>
+  <meta name="description" content="Read, edit, annotate, sign, fill, merge, split, redact and convert PDFs. 100% in your browser — files never leave your device." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23d93025'/><text x='16' y='22' font-family='Arial' font-weight='bold' font-size='13' fill='white' text-anchor='middle'>PDF</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Dancing+Script:wght@600&family=Great+Vibes&family=Homemade+Apple&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">PDF</span><span class="brand-name">Studio</span></div>
+    <button class="btn" id="btnOpen" data-icon="open" title="Open PDF or images (Ctrl+O)"><span>Open</span></button>
+    <button class="btn needs-doc" id="btnAdd" data-icon="plus" title="Add / merge more PDFs or images"><span>Add files</span></button>
+    <div class="sep"></div>
+    <button class="icon-btn needs-doc" id="btnUndo" data-icon="undo" title="Undo (Ctrl+Z)"></button>
+    <button class="icon-btn needs-doc" id="btnRedo" data-icon="redo" title="Redo (Ctrl+Y)"></button>
+    <div class="sep"></div>
+    <div class="zoom needs-doc">
+      <button class="icon-btn" id="btnZoomOut" data-icon="minus" title="Zoom out"></button>
+      <select id="zoomSelect" title="Zoom">
+        <option value="fit">Fit width</option>
+        <option value="page">Fit page</option>
+        <option value="0.5">50%</option><option value="0.75">75%</option>
+        <option value="1">100%</option><option value="1.25">125%</option>
+        <option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option>
+      </select>
+      <button class="icon-btn" id="btnZoomIn" data-icon="plus" title="Zoom in"></button>
+    </div>
+    <div class="pagenav needs-doc">
+      <input id="pageInput" type="text" inputmode="numeric" value="1" title="Go to page" />
+      <span id="pageCount">/ 0</span>
+    </div>
+    <div class="search needs-doc">
+      <span data-icon="search" class="search-ico"></span>
+      <input id="searchInput" type="search" placeholder="Find text (Ctrl+F)" />
+      <span id="searchCount"></span>
+      <button class="icon-btn small" id="searchPrev" data-icon="up" title="Previous match"></button>
+      <button class="icon-btn small" id="searchNext" data-icon="down" title="Next match"></button>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn needs-doc" id="btnTools" data-icon="grid" title="All tools"><span>All tools</span></button>
+    <div class="dropdown needs-doc">
+      <button class="btn primary" id="btnDownload" data-icon="download" title="Download (Ctrl+S)"><span>Download</span></button>
+      <button class="btn primary caret" id="btnDownloadMenu" data-icon="down" title="More save options"></button>
+      <div class="menu" id="downloadMenu">
+        <button data-act="save">Save PDF</button>
+        <button data-act="saveFlat">Save flattened PDF (forms not editable)</button>
+        <button data-act="images">Save pages as images (ZIP)</button>
+        <button data-act="print">Print</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="toolbar needs-doc-flex" id="toolbar">
+    <div class="tools" id="toolButtons">
+      <button class="tool active" data-tool="select" data-icon="cursor" title="Select / move (V)"><span>Select</span></button>
+      <button class="tool" data-tool="hand" data-icon="hand" title="Pan (H)"><span>Pan</span></button>
+      <i class="tsep"></i>
+      <button class="tool" data-tool="text" data-icon="text" title="Add text (T)"><span>Text</span></button>
+      <button class="tool" data-tool="edittext" data-icon="edit" title="Edit existing text (E)"><span>Edit text</span></button>
+      <button class="tool" data-tool="highlight" data-icon="highlight" title="Highlight (drag area)"><span>Highlight</span></button>
+      <button class="tool" data-tool="draw" data-icon="pen" title="Freehand draw (D)"><span>Draw</span></button>
+      <button class="tool" data-tool="rect" data-icon="rect" title="Rectangle"><span>Box</span></button>
+      <button class="tool" data-tool="ellipse" data-icon="ellipse" title="Ellipse"><span>Circle</span></button>
+      <button class="tool" data-tool="line" data-icon="line" title="Line"><span>Line</span></button>
+      <button class="tool" data-tool="arrow" data-icon="arrow" title="Arrow"><span>Arrow</span></button>
+      <button class="tool" data-tool="note" data-icon="note" title="Sticky note comment"><span>Note</span></button>
+      <i class="tsep"></i>
+      <button class="tool" data-tool="sign" data-icon="sign" title="Sign / initials"><span>Sign</span></button>
+      <button class="tool" data-tool="image" data-icon="image" title="Insert image"><span>Image</span></button>
+      <button class="tool" data-tool="stamp" data-icon="stamp" title="Stamps & checkmarks"><span>Stamp</span></button>
+      <button class="tool" data-tool="date" data-icon="calendar" title="Insert today's date"><span>Date</span></button>
+      <i class="tsep"></i>
+      <button class="tool" data-tool="whiteout" data-icon="eraser" title="White-out (cover content)"><span>White-out</span></button>
+      <button class="tool" data-tool="redact" data-icon="redact" title="Redact (permanently removes content under the box)"><span>Redact</span></button>
+    </div>
+    <div class="props" id="props">
+      <label class="prop" data-prop="color" title="Color"><input type="color" id="propColor" value="#1f2937" /></label>
+      <label class="prop" data-prop="fill" title="Fill color"><span>Fill</span><input type="checkbox" id="propFillOn" /><input type="color" id="propFill" value="#bfdbfe" /></label>
+      <label class="prop" data-prop="font" title="Font"><select id="propFont"><option>Helvetica</option><option>Times</option><option>Courier</option></select></label>
+      <label class="prop" data-prop="size" title="Font size"><input type="number" id="propSize" min="4" max="200" value="14" /><span>pt</span></label>
+      <button class="prop toggle" data-prop="bold" id="propBold" title="Bold"><b>B</b></button>
+      <button class="prop toggle" data-prop="italic" id="propItalic" title="Italic"><i>I</i></button>
+      <label class="prop" data-prop="stroke" title="Line width"><span>Width</span><input type="range" id="propStroke" min="0.5" max="12" step="0.5" value="2" /></label>
+      <label class="prop" data-prop="opacity" title="Opacity"><span>Opacity</span><input type="range" id="propOpacity" min="0.1" max="1" step="0.05" value="1" /></label>
+      <button class="prop danger-btn" data-prop="delete" id="propDelete" data-icon="trash" title="Delete selected (Del)"></button>
+    </div>
+  </div>
+
+  <div class="main">
+    <aside class="sidebar needs-doc-flex" id="sidebar">
+      <div class="side-head">
+        <strong>Pages <span id="sideCount"></span></strong>
+        <button class="icon-btn small" id="btnSideToggle" data-icon="left" title="Hide pages panel"></button>
+      </div>
+      <div class="side-actions">
+        <button class="icon-btn small" id="pgSelectAll" data-icon="checkall" title="Select all / none"></button>
+        <button class="icon-btn small" id="pgRotL" data-icon="rotl" title="Rotate selected left"></button>
+        <button class="icon-btn small" id="pgRotR" data-icon="rotr" title="Rotate selected right"></button>
+        <button class="icon-btn small" id="pgBlank" data-icon="pageplus" title="Insert blank page after current"></button>
+        <button class="icon-btn small" id="pgExtract" data-icon="extract" title="Extract selected pages to new PDF"></button>
+        <button class="icon-btn small danger" id="pgDelete" data-icon="trash" title="Delete selected pages"></button>
+      </div>
+      <div class="thumbs" id="thumbs"></div>
+    </aside>
+    <button class="side-reopen needs-doc" id="btnSideOpen" data-icon="right" title="Show pages panel"></button>
+
+    <main class="viewer" id="viewer">
+      <section class="welcome" id="welcome">
+        <div class="drop" id="dropZone">
+          <div class="drop-ico" data-icon="filepdf"></div>
+          <h1>Edit any PDF, right in your browser</h1>
+          <p>Drop a PDF or images here, or choose an option below. Nothing is uploaded — everything happens on your device.</p>
+          <div class="welcome-actions">
+            <button class="btn primary big" id="wOpen" data-icon="open"><span>Open PDF</span></button>
+            <button class="btn big" id="wImages" data-icon="image"><span>Images → PDF</span></button>
+            <button class="btn big" id="wBlank" data-icon="pageplus"><span>Blank PDF</span></button>
+          </div>
+        </div>
+        <div class="features">
+          <div><b>Read</b><span>Fast viewer, zoom, search, thumbnails</span></div>
+          <div><b>Edit</b><span>Add &amp; replace text, images, shapes, white-out</span></div>
+          <div><b>Comment</b><span>Highlight, draw, arrows, sticky notes, stamps</span></div>
+          <div><b>Sign</b><span>Draw, type or upload a signature — saved for reuse</span></div>
+          <div><b>Fill forms</b><span>Type into PDF form fields, then flatten</span></div>
+          <div><b>Organize</b><span>Merge, split, reorder, rotate, delete, extract</span></div>
+          <div><b>Protect</b><span>True redaction that removes hidden text</span></div>
+          <div><b>Convert</b><span>PDF ⇄ images, compress, page numbers, watermark</span></div>
+        </div>
+      </section>
+      <div class="pages" id="pages"></div>
+    </main>
+  </div>
+
+  <div class="statusbar needs-doc-flex" id="statusbar">
+    <span id="statusFile"></span>
+    <span class="hint" id="statusHint"></span>
+  </div>
+
+  <div class="modal-back" id="modalBack"><div class="modal" id="modal"></div></div>
+  <div class="toasts" id="toasts"></div>
+  <div class="busy" id="busy"><div class="spinner"></div><span id="busyText">Working…</span></div>
+
+  <input type="file" id="fileOpen" accept="application/pdf,.pdf,image/*" multiple hidden />
+  <input type="file" id="fileAdd" accept="application/pdf,.pdf,image/*" multiple hidden />
+  <input type="file" id="fileImage" accept="image/*" hidden />
+</body>
+</html>
