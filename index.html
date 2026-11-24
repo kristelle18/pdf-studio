@@ -36,6 +36,16 @@
       </select>
       <button class="icon-btn" id="btnZoomIn" data-icon="plus" title="Zoom in"></button>
     </div>
+    <div class="dropdown needs-doc">
+      <button class="btn" id="btnView" data-icon="eye" title="View options"><span>View</span></button>
+      <div class="menu" id="viewMenu">
+        <button data-v="two" class="tg">Two-page view</button>
+        <button data-v="night" class="tg">Night reading (dark pages)</button>
+        <button data-v="present">Presentation mode (full screen)</button>
+        <button data-v="read">Read aloud from this page</button>
+        <button data-v="info">Document info</button>
+      </div>
+    </div>
     <div class="pagenav needs-doc">
       <input id="pageInput" type="text" inputmode="numeric" value="1" title="Go to page" />
       <span id="pageCount">/ 0</span>
@@ -48,12 +58,14 @@
       <button class="icon-btn small" id="searchNext" data-icon="down" title="Next match"></button>
     </div>
     <div class="spacer"></div>
+    <button class="icon-btn" id="btnTheme" data-icon="moon" title="Dark mode"></button>
     <button class="btn needs-doc" id="btnTools" data-icon="grid" title="All tools"><span>All tools</span></button>
     <div class="dropdown needs-doc">
       <button class="btn primary" id="btnDownload" data-icon="download" title="Download (Ctrl+S)"><span>Download</span></button>
       <button class="btn primary caret" id="btnDownloadMenu" data-icon="down" title="More save options"></button>
       <div class="menu" id="downloadMenu">
         <button data-act="save">Save PDF</button>
+        <button data-act="protect">Save with password…</button>
         <button data-act="saveFlat">Save flattened PDF (forms not editable)</button>
         <button data-act="images">Save pages as images (ZIP)</button>
         <button data-act="print">Print</button>
@@ -80,9 +92,11 @@
       <button class="tool" data-tool="image" data-icon="image" title="Insert image"><span>Image</span></button>
       <button class="tool" data-tool="stamp" data-icon="stamp" title="Stamps & checkmarks"><span>Stamp</span></button>
       <button class="tool" data-tool="date" data-icon="calendar" title="Insert today's date"><span>Date</span></button>
+      <button class="tool" data-tool="field" data-icon="form" title="Create a fillable form field (F)"><span>Field</span></button>
       <i class="tsep"></i>
       <button class="tool" data-tool="whiteout" data-icon="eraser" title="White-out (cover content)"><span>White-out</span></button>
       <button class="tool" data-tool="redact" data-icon="redact" title="Redact (permanently removes content under the box)"><span>Redact</span></button>
+      <button class="tool" data-tool="crop" data-icon="crop" title="Crop pages (C)"><span>Crop</span></button>
     </div>
     <div class="props" id="props">
       <label class="prop" data-prop="color" title="Color"><input type="color" id="propColor" value="#1f2937" /></label>
@@ -100,18 +114,25 @@
   <div class="main">
     <aside class="sidebar needs-doc-flex" id="sidebar">
       <div class="side-head">
-        <strong>Pages <span id="sideCount"></span></strong>
-        <button class="icon-btn small" id="btnSideToggle" data-icon="left" title="Hide pages panel"></button>
+        <div class="side-tabs"><button data-pane="pages" class="on">Pages <span id="sideCount"></span></button><button data-pane="outline">Bookmarks</button><button data-pane="comments">Comments</button></div>
+        <button class="icon-btn small" id="btnSideToggle" data-icon="left" title="Hide side panel"></button>
       </div>
-      <div class="side-actions">
-        <button class="icon-btn small" id="pgSelectAll" data-icon="checkall" title="Select all / none"></button>
-        <button class="icon-btn small" id="pgRotL" data-icon="rotl" title="Rotate selected left"></button>
-        <button class="icon-btn small" id="pgRotR" data-icon="rotr" title="Rotate selected right"></button>
-        <button class="icon-btn small" id="pgBlank" data-icon="pageplus" title="Insert blank page after current"></button>
-        <button class="icon-btn small" id="pgExtract" data-icon="extract" title="Extract selected pages to new PDF"></button>
-        <button class="icon-btn small danger" id="pgDelete" data-icon="trash" title="Delete selected pages"></button>
+      <div class="side-pane" data-pane="pages">
+        <div class="side-actions">
+          <button class="icon-btn small" id="pgSelectAll" data-icon="checkall" title="Select all / none"></button>
+          <button class="icon-btn small" id="pgRotL" data-icon="rotl" title="Rotate selected left"></button>
+          <button class="icon-btn small" id="pgRotR" data-icon="rotr" title="Rotate selected right"></button>
+          <button class="icon-btn small" id="pgBlank" data-icon="pageplus" title="Insert blank page after current"></button>
+          <button class="icon-btn small" id="pgExtract" data-icon="extract" title="Extract selected pages to new PDF"></button>
+          <button class="icon-btn small danger" id="pgDelete" data-icon="trash" title="Delete selected pages"></button>
+        </div>
+        <div class="thumbs" id="thumbs"></div>
       </div>
-      <div class="thumbs" id="thumbs"></div>
+      <div class="side-pane" data-pane="outline" hidden>
+        <div class="side-actions"><button class="btn small-btn" id="bmAdd" data-icon="bookmark"><span>Add bookmark</span></button></div>
+        <div class="outline" id="outline"></div>
+      </div>
+      <div class="side-pane" data-pane="comments" hidden><div class="comments" id="comments"></div></div>
     </aside>
     <button class="side-reopen needs-doc" id="btnSideOpen" data-icon="right" title="Show pages panel"></button>
 
@@ -140,6 +161,12 @@
   </div>
 
   <div class="modal-back" id="modalBack"><div class="modal" id="modal"></div></div>
+  <div class="tts-bar" id="ttsBar" hidden>
+    <span data-icon="speaker"></span><span id="ttsLabel">Reading…</span>
+    <select id="ttsRate" title="Speed"><option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select>
+    <button class="btn" id="ttsPause">Pause</button><button class="btn" id="ttsNext">Next page</button><button class="btn" id="ttsStop">Stop</button>
+  </div>
+  <div class="present" id="present" hidden><div class="present-stage" id="presentStage"></div><div class="present-bar"><span id="presentCount"></span> · ← → to move · Esc to exit <button id="presentClose">Exit</button></div></div>
   <div class="toasts" id="toasts"></div>
   <div class="busy" id="busy"><div class="spinner"></div><span id="busyText">Working…</span></div>
 
