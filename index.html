@@ -12,11 +12,13 @@
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
   <script type="module" src="app.js"></script>
 </head>
 <body>
   <header class="topbar">
     <div class="brand"><span class="logo">PDF</span><span class="brand-name">Studio</span></div>
+    <button class="btn needs-doc" id="btnHome" data-icon="home" title="Back to all tools"><span>Home</span></button>
     <button class="btn" id="btnOpen" data-icon="open" title="Open PDF or images (Ctrl+O)"><span>Open</span></button>
     <button class="btn needs-doc" id="btnAdd" data-icon="plus" title="Add / merge more PDFs or images"><span>Add files</span></button>
     <div class="sep"></div>
@@ -125,16 +127,8 @@
             <button class="btn big" id="wBlank" data-icon="pageplus"><span>Blank PDF</span></button>
           </div>
         </div>
-        <div class="features">
-          <div><b>Read</b><span>Fast viewer, zoom, search, thumbnails</span></div>
-          <div><b>Edit</b><span>Add &amp; replace text, images, shapes, white-out</span></div>
-          <div><b>Comment</b><span>Highlight, draw, arrows, sticky notes, stamps</span></div>
-          <div><b>Sign</b><span>Draw, type or upload a signature — saved for reuse</span></div>
-          <div><b>Fill forms</b><span>Type into PDF form fields, then flatten</span></div>
-          <div><b>Organize</b><span>Merge, split, reorder, rotate, delete, extract</span></div>
-          <div><b>Protect</b><span>True redaction that removes hidden text</span></div>
-          <div><b>Convert</b><span>PDF ⇄ images, compress, page numbers, watermark</span></div>
-        </div>
+        <h2 class="home-h">All tools <span>— pick one, then choose your file</span></h2>
+        <div class="tool-grid home-grid" id="homeTools"></div>
       </section>
       <div class="pages" id="pages"></div>
     </main>
