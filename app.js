@@ -76,7 +76,7 @@ const S = {
   docOps: { pageNumbers: null, watermark: null, meta: null },
   td: {
     text: { color: '#111827', font: 'Helvetica', size: 14, bold: false, italic: false, opacity: 1 },
-    highlight: { color: '#fde047', opacity: 0.45 },
+    highlight: { color: '#fde047', opacity: 0.45, width: 14 },
     draw: { color: '#2563eb', width: 2, opacity: 1 },
     rect: { color: '#dc2626', fill: null, width: 2, opacity: 1 },
     ellipse: { color: '#dc2626', fill: null, width: 2, opacity: 1 },
@@ -88,14 +88,14 @@ const S = {
 const TYPE_TOOL = { text: 'text', highlight: 'highlight', ink: 'draw', rect: 'rect', ellipse: 'ellipse', line: 'line', arrow: 'arrow', image: 'image' };
 const PROPS_FOR = {
   text: ['color', 'font', 'size', 'bold', 'italic', 'opacity'], date: ['color', 'font', 'size', 'bold', 'italic'], edittext: ['color', 'font', 'size'],
-  highlight: ['color', 'opacity'], draw: ['color', 'stroke', 'opacity'], rect: ['color', 'fill', 'stroke', 'opacity'], ellipse: ['color', 'fill', 'stroke', 'opacity'],
+  highlight: ['color', 'stroke', 'opacity'], draw: ['color', 'stroke', 'opacity'], rect: ['color', 'fill', 'stroke', 'opacity'], ellipse: ['color', 'fill', 'stroke', 'opacity'],
   line: ['color', 'stroke', 'opacity'], arrow: ['color', 'stroke', 'opacity'], image: ['opacity'],
 };
 const HINTS = {
   select: 'Click an item to select it. Drag to move, use the corner handle to resize. Double-click text to edit. Fill form fields by clicking them.',
   hand: 'Drag to scroll around the document.', text: 'Click anywhere on a page to add text.',
   edittext: 'Click on existing text to replace it. The original is covered and your editable copy appears on top.',
-  highlight: 'Drag over the area you want to highlight.', draw: 'Draw freehand with your mouse, pen or finger.',
+  highlight: 'Drag sideways along a line of text to highlight it. The stroke stays straight and snaps to the line; change thickness with Width.', draw: 'Draw freehand with your mouse, pen or finger.',
   rect: 'Drag to draw a box.', ellipse: 'Drag to draw a circle or ellipse.', line: 'Drag to draw a line.', arrow: 'Drag to draw an arrow.',
   note: 'Click to add a sticky-note comment.', date: "Click to insert today's date.",
   whiteout: 'Drag to cover content with white. (Hidden content is still in the file — use Redact to remove it.)',
@@ -281,7 +281,7 @@ function resetDoc(keepPages = []) {
   S.formInit = Object.fromEntries(Object.entries(S.formInit).filter(([k]) => keepKey(k)));
   S.annots = []; S.sel = null; S.placing = null; S.selPages.clear(); S.current = 0;
   S.docOps = { pageNumbers: null, watermark: null, meta: null };
-  H.undo = []; H.redo = []; textCache.clear(); thumbCache.clear(); search.hits = []; search.q = ''; $('#searchInput').value = ''; $('#searchCount').textContent = '';
+  H.undo = []; H.redo = []; textCache.clear(); textResolved.clear(); thumbCache.clear(); search.hits = []; search.q = ''; $('#searchInput').value = ''; $('#searchCount').textContent = '';
   for (const pe of pageEls.values()) { io.unobserve(pe.wrap); pe.wrap.remove(); } pageEls.clear();
 }
 function startDoc() {
@@ -545,7 +545,7 @@ function annotEl(a) {
   switch (a.type) {
     case 'text':
       el.textContent = a.text; applyTextStyle(el, a);
-      requestAnimationFrame(() => { if (el.isConnected) { a.w = el.offsetWidth / S.zoom; a.h = el.offsetHeight / S.zoom; } });
+      requestAnimationFrame(() => { if (el.isConnected) { a.w = el.offsetWidth * (a.sx || 1) / S.zoom; a.h = el.offsetHeight / S.zoom; } });
       break;
     case 'highlight': pos(a); el.style.background = a.color; el.style.opacity = op; break;
     case 'whiteout': pos(a); el.style.background = '#fff'; break;
@@ -579,7 +579,7 @@ function annotEl(a) {
 }
 function applyTextStyle(el, a) {
   const z = S.zoom;
-  Object.assign(el.style, { left: a.x * z + 'px', top: a.y * z + 'px', fontSize: a.size * z + 'px', fontFamily: FONT_CSS[a.font], fontWeight: a.bold ? 700 : 400, fontStyle: a.italic ? 'italic' : 'normal', color: a.color, opacity: a.opacity ?? 1 });
+  Object.assign(el.style, { left: a.x * z + 'px', top: a.y * z + 'px', fontSize: a.size * z + 'px', fontFamily: FONT_CSS[a.font], fontWeight: a.bold ? 700 : 400, fontStyle: a.italic ? 'italic' : 'normal', color: a.color, opacity: a.opacity ?? 1, transformOrigin: '0 0', transform: a.sx && a.sx !== 1 ? `scaleX(${a.sx})` : '' });
 }
 function updateAnnotEl(a) {
   const pe = pageEls.get(a.pageId); if (!pe) return;
@@ -664,7 +664,8 @@ function onOverlayDown(e, p) {
     case 'text': e.preventDefault(); createText(p, pt, ''); return;
     case 'date': e.preventDefault(); createText(p, pt, new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })); return;
     case 'note': e.preventDefault(); createNote(p, pt); return;
-    case 'highlight': case 'rect': case 'ellipse': case 'whiteout': case 'redact': e.preventDefault(); dragRect(e, p, pe, t); return;
+    case 'highlight': e.preventDefault(); dragHighlight(e, p, pe); return;
+    case 'rect': case 'ellipse': case 'whiteout': case 'redact': e.preventDefault(); dragRect(e, p, pe, t); return;
     case 'line': case 'arrow': e.preventDefault(); dragLine(e, p, pe, t); return;
     case 'draw': e.preventDefault(); drawInk(e, p, pe); return;
   }
@@ -688,6 +689,26 @@ function dragRect(e, p, pe, kind) {
     if (kind === 'highlight') Object.assign(a, S.td.highlight);
     if (kind === 'rect' || kind === 'ellipse') Object.assign(a, S.td[kind]);
     addAnnot(a, snap()); if (kind === 'redact') toast('Redaction marked. It is applied permanently when you save.');
+  }, { once: true });
+}
+// Highlighter: a straight horizontal stroke. Starting on a line of text snaps the stroke to that line's height.
+function dragHighlight(e, p, pe) {
+  const st = S.td.highlight; const start = evtPt(e, pe.overlay);
+  let top = start.y - st.width / 2, h = st.width;
+  const items = textResolved.get(textKey(p)) || [];
+  const hit = items.map((it) => itemRect(it)).find((r) => Math.abs(r.h) > 0 && start.x >= r.x - 4 && start.x <= r.x + r.w + 4 && start.y >= r.y && start.y <= r.y + r.h);
+  if (hit) { top = hit.y + hit.h * 0.06; h = hit.h * 0.9; }
+  let x0 = start.x, x1 = start.x;
+  const rub = document.createElement('div'); rub.className = 'annot a-highlight';
+  Object.assign(rub.style, { background: st.color, opacity: st.opacity, pointerEvents: 'none' }); pe.overlay.appendChild(rub);
+  const draw = () => { const z = S.zoom; Object.assign(rub.style, { left: Math.min(x0, x1) * z + 'px', top: top * z + 'px', width: Math.abs(x1 - x0) * z + 'px', height: h * z + 'px' }); };
+  draw();
+  const mv = (ev) => { x1 = evtPt(ev, pe.overlay).x; draw(); };
+  window.addEventListener('pointermove', mv);
+  window.addEventListener('pointerup', () => {
+    window.removeEventListener('pointermove', mv); rub.remove();
+    const w = Math.abs(x1 - x0); if (w < 2) return;
+    addAnnot({ id: uid(), pageId: p.id, type: 'highlight', x: Math.min(x0, x1), y: top, w, h, color: st.color, opacity: st.opacity }, snap());
   }, { once: true });
 }
 function dragLine(e, p, pe, kind) {
@@ -751,7 +772,7 @@ function startEdit(id, before, isNew = false) {
   el.classList.add('editing'); el.querySelectorAll('.handle,.annot-del').forEach((h) => h.remove());
   el.focus();
   const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-  el.oninput = () => { a.text = el.innerText.replace(/\n$/, ''); a.w = el.offsetWidth / S.zoom; a.h = el.offsetHeight / S.zoom; };
+  el.oninput = () => { a.text = el.innerText.replace(/\n$/, ''); a.w = el.offsetWidth * (a.sx || 1) / S.zoom; a.h = el.offsetHeight / S.zoom; };
   el.onpaste = (ev) => { ev.preventDefault(); document.execCommand('insertText', false, ev.clipboardData.getData('text/plain')); };
   el.onblur = () => setTimeout(() => { if (editing?.id === id && document.activeElement !== el) finishEdit(); }, 0);
   el.onkeydown = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); el.blur(); } ev.stopPropagation(); };
@@ -810,8 +831,10 @@ function placeAsset(p, pt) {
 
 /* edit existing text */
 const textCache = new Map();
+const textResolved = new Map();
+const textKey = (p) => `${p.srcId}:${p.index}:${totalRot(p)}`;
 function textItems(p) {
-  const key = `${p.srcId}:${p.index}:${totalRot(p)}`;
+  const key = textKey(p);
   if (!textCache.has(key)) textCache.set(key, (async () => {
     const page = await S.sources.get(p.srcId).pdf.getPage(p.index + 1);
     const vp = page.getViewport({ scale: 1, rotation: totalRot(p) });
@@ -824,6 +847,7 @@ function textItems(p) {
       const dl = Math.hypot(tx[0], tx[1]) || fh;
       out.push({ str: it.str, eol: it.hasEOL, o: [tx[4], tx[5]], dir: [tx[0] / dl, tx[1] / dl], up: [tx[2] / fh, tx[3] / fh], fh, width: it.width, family: tc.styles[it.fontName]?.fontFamily || '' });
     }
+    textResolved.set(key, out);
     return out;
   })());
   return textCache.get(key);
@@ -856,7 +880,12 @@ function convertItem(p, it, r) {
   const fam = /mono|courier/i.test(it.family) ? 'Courier' : (/serif|times/i.test(it.family) && !/sans/i.test(it.family)) ? 'Times' : 'Helvetica';
   S.annots.push({ id: uid(), pageId: p.id, type: 'whiteout', x: r.x - 1, y: r.y - 1, w: r.w + 2, h: r.h + 2 });
   const size = Math.round(it.fh * 10) / 10;
-  const a = { id: uid(), pageId: p.id, type: 'text', text: it.str.replace(/ﬁ/g, 'fi').replace(/ﬂ/g, 'fl').replace(/ﬀ/g, 'ff'), x: it.o[0], y: it.o[1] - size * BASELINE[fam], size, font: fam, bold: false, italic: false, color: '#000000', opacity: 1 };
+  const text = it.str.replace(/ﬁ/g, 'fi').replace(/ﬂ/g, 'fl').replace(/ﬀ/g, 'ff');
+  // The original font usually isn't available, so squeeze/stretch ours to keep the original line width.
+  const mc = (convertItem.c ||= document.createElement('canvas').getContext('2d'));
+  mc.font = `${size}px ${FONT_CSS[fam]}`; const natural = mc.measureText(text).width;
+  let sx = natural > 0 && it.width > 0 ? it.width / natural : 1; sx = Math.abs(sx - 1) < 0.02 ? 1 : clamp(sx, 0.6, 1.4);
+  const a = { id: uid(), pageId: p.id, type: 'text', text, x: it.o[0], y: it.o[1] - size * BASELINE[fam], size, sx, font: fam, bold: false, italic: false, color: '#000000', opacity: 1 };
   S.annots.push(a); renderOverlay(p); renderTextLayer(p);
   startEdit(a.id, before, true);
 }
@@ -912,7 +941,7 @@ function setTool(t) {
   $$('.overlay').forEach((o) => { o.classList.toggle('drawing', drawing); o.classList.toggle('texting', ['text', 'date', 'note'].includes(t)); });
   if (t !== 'select') deselect();
   $('#statusHint').textContent = HINTS[t] || '';
-  S.pages.forEach((p) => { const pe = pageEls.get(p.id); if (!pe) return; if (t === 'edittext') renderTextLayer(p); else pe.tl.innerHTML = ''; });
+  S.pages.forEach((p) => { const pe = pageEls.get(p.id); if (!pe) return; if (t === 'edittext') renderTextLayer(p); else pe.tl.innerHTML = ''; if (t === 'highlight') textItems(p).catch(() => {}); });
   updateProps();
 }
 function currentStyle() {
@@ -1315,8 +1344,10 @@ async function drawAnnots(out, pg, vp, list, getFont, getImg) {
     const op = a.opacity ?? 1;
     switch (a.type) {
       case 'text': {
-        const f = await getFont(fontKey(a.font, a.bold, a.italic));
+        const f = await getFont(fontKey(a.font, a.bold, a.italic)); const sx = a.sx || 1;
+        if (sx !== 1) pg.pushOperators(L.pushGraphicsState(), L.concatTransformationMatrix(sx, 0, 0, 1, a.x * (1 - sx), 0));
         a.text.split('\n').forEach((ln, i) => { const s = sanitize(f, ln); if (s) pg.drawText(s, { x: a.x, y: Hd - (a.y + a.size * (1.2 * i + BASELINE[a.font])), size: a.size, font: f, color: hex2rgb(a.color), opacity: op }); });
+        if (sx !== 1) pg.pushOperators(L.popGraphicsState());
         break;
       }
       case 'highlight': pg.drawRectangle({ x: a.x, y: Hd - a.y - a.h, width: a.w, height: a.h, color: hex2rgb(a.color), opacity: op, blendMode: L.BlendMode.Multiply }); break;
