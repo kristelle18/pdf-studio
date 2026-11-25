@@ -186,10 +186,11 @@ async function convertItem(p, it, r) {
   const before = snap();
   const fam = /mono|courier/i.test(it.family) ? 'Courier' : (/serif|times/i.test(it.family) && !/sans/i.test(it.family)) ? 'Times' : 'Helvetica';
   const { fg, bg } = sampleColors(p, r);
-  const pf = await getPdfFont(p, it.fontName);
+  const pf = it.ocr ? null : await getPdfFont(p, it.fontName);
   const size = Math.round(it.fh * 100) / 100;
   const text = it.str.replace(/ﬁ/g, 'fi').replace(/ﬂ/g, 'fl').replace(/ﬀ/g, 'ff');
   const a = { id: uid(), pageId: p.id, type: 'text', text, x: it.o[0], size, font: fam, bold: false, italic: false, color: fg, opacity: 1 };
+  if (it.ocr) a.ocrOf = it.ocrKey; // the hidden OCR text for this line is left out of the saved file
   if (pf?.std) a.font = pf.std;
   if (pf?.family) a.pdfFont = pf.key; else if (pf) { a.bold = pf.bold; a.italic = pf.italic; }
   a.y = it.o[1] - size * textBaseline(a);
@@ -255,6 +256,7 @@ function setTool(t) {
   $('#statusHint').textContent = HINTS[t] || '';
   S.pages.forEach((p) => { const pe = pageEls.get(p.id); if (!pe) return; if (t === 'edittext') renderTextLayer(p); else pe.tl.innerHTML = ''; if (t === 'highlight') textItems(p).catch(() => {}); });
   updateProps();
+  if (t === 'edittext') setTimeout(() => offerOcrForEdit().catch((e) => console.warn(e)), 250);
 }
 function currentStyle() {
   const a = S.sel && annotById(S.sel);
