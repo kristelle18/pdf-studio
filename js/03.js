@@ -181,24 +181,65 @@ function sampleColors(p, r) {
   const isWhite = bg.every((v) => v > 244);
   return { fg: far > 60 ? hex(fg) : '#000000', bg: isWhite ? '#ffffff' : hex(bg) };
 }
+// OCR text has no font inside the PDF: try the standard fonts (regular, bold, italic) at the size that fits the
+// line's ink box, draw each one, and keep the one that looks most like the picture of the line.
+function matchOcrStyle(p, text, R) {
+  const mc = (matchOcrStyle.m ||= document.createElement('canvas').getContext('2d'));
+  const W = 240, sc = W / Math.max(1, R.w), Hh = Math.max(8, Math.round(R.h * sc));
+  const lum = (px) => { const o = new Float32Array(px.length / 4); for (let i = 0; i < o.length; i++) o[i] = 255 - (px[i * 4] * 0.299 + px[i * 4 + 1] * 0.587 + px[i * 4 + 2] * 0.114); return o; };
+  const corr = (a, b) => { let ma = 0, mb = 0; for (let i = 0; i < a.length; i++) { ma += a[i]; mb += b[i]; } ma /= a.length; mb /= b.length; let n = 0, da = 0, db = 0; for (let i = 0; i < a.length; i++) { const x = a[i] - ma, y = b[i] - mb; n += x * y; da += x * x; db += y * y; } return da && db ? n / Math.sqrt(da * db) : 0; };
+  const pe = pageEls.get(p.id); const src = pe?.canvas; const d = dispSize(p); let ref = null;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = Hh; const cx = cv.getContext('2d', { willReadFrequently: true });
+  if (src && src.width) {
+    const k = src.width / d.w; cx.fillStyle = '#fff'; cx.fillRect(0, 0, W, Hh);
+    safe(() => { cx.drawImage(src, R.x * k, R.y * k, R.w * k, R.h * k, 0, 0, W, Hh); ref = lum(cx.getImageData(0, 0, W, Hh).data); });
+  }
+  let best = null;
+  for (const font of ['Times', 'Helvetica', 'Courier']) for (const bold of [false, true]) for (const italic of [false, true]) {
+    const style = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}`;
+    mc.font = `${style}100px ${FONT_CSS[font]}`; const t = mc.measureText(text);
+    const asc = t.actualBoundingBoxAscent, desc = t.actualBoundingBoxDescent, left = t.actualBoundingBoxLeft, inkW = t.actualBoundingBoxLeft + t.actualBoundingBoxRight;
+    if (!(asc + desc > 0) || !(inkW > 0)) continue;
+    const size = R.h / ((asc + desc) / 100); const sx = R.w / (inkW * size / 100);
+    const c = { font, bold, italic, size, sx, x: R.x + left * size / 100 * sx, baseline: R.y + asc * size / 100 };
+    let score = -0.6 * Math.abs(Math.log(sx));
+    if (ref) {
+      cx.setTransform(1, 0, 0, 1, 0, 0); cx.fillStyle = '#fff'; cx.fillRect(0, 0, W, Hh); cx.fillStyle = '#000';
+      cx.font = `${style}${size * sc}px ${FONT_CSS[font]}`; cx.setTransform(sx, 0, 0, 1, (c.x - R.x) * sc, (c.baseline - R.y) * sc); cx.fillText(text, 0, 0);
+      cx.setTransform(1, 0, 0, 1, 0, 0); score += corr(ref, lum(cx.getImageData(0, 0, W, Hh).data));
+    }
+    if (!best || score > best.score) best = { ...c, score };
+  }
+  return best;
+}
 async function convertItem(p, it, r) {
   finishEdit();
   const before = snap();
   const fam = /mono|courier/i.test(it.family) ? 'Courier' : (/serif|times/i.test(it.family) && !/sans/i.test(it.family)) ? 'Times' : 'Helvetica';
-  const { fg, bg } = sampleColors(p, r);
   const pf = it.ocr ? null : await getPdfFont(p, it.fontName);
-  const size = Math.round(it.fh * 100) / 100;
   const text = it.str.replace(/ﬁ/g, 'fi').replace(/ﬂ/g, 'fl').replace(/ﬀ/g, 'ff');
-  const a = { id: uid(), pageId: p.id, type: 'text', text, x: it.o[0], size, font: fam, bold: false, italic: false, color: fg, opacity: 1 };
-  if (it.ocr) a.ocrOf = it.ocrKey; // the hidden OCR text for this line is left out of the saved file
-  if (pf?.std) a.font = pf.std;
-  if (pf?.family) a.pdfFont = pf.key; else if (pf) { a.bold = pf.bold; a.italic = pf.italic; }
-  a.y = it.o[1] - size * textBaseline(a);
-  // Keep the original line width: squeeze/stretch slightly if our rendering differs.
-  const mc = (convertItem.c ||= document.createElement('canvas').getContext('2d'));
-  mc.font = `${textItalic(a) ? 'italic ' : ''}${textBold(a) ? 'bold ' : ''}${size}px ${fontCss(a)}`; const natural = mc.measureText(text).width;
-  let sx = natural > 0 && it.width > 0 ? it.width / natural : 1; a.sx = Math.abs(sx - 1) < 0.02 ? 1 : clamp(sx, 0.6, 1.4);
-  S.annots.push({ id: uid(), pageId: p.id, type: 'whiteout', x: r.x - 1, y: r.y - 1, w: r.w + 2, h: r.h + 2, ...(bg !== '#ffffff' ? { fill: bg } : {}) });
+  let cover = { x: r.x - 1, y: r.y - 1, w: r.w + 2, h: r.h + 2 };
+  const a = { id: uid(), pageId: p.id, type: 'text', text, x: it.o[0], size: Math.round(it.fh * 100) / 100, font: fam, bold: false, italic: false, opacity: 1 };
+  const m = it.ocr && matchOcrStyle(p, text.trim(), { x: it.o[0], y: it.o[1] - it.fh * 0.92, w: it.width, h: it.fh * 1.16 });
+  if (m) {
+    a.ocrOf = it.ocrKey; // the hidden OCR text for this line is left out of the saved file
+    a.text = text.trim();
+    Object.assign(a, { font: m.font, bold: m.bold, italic: m.italic, size: Math.round(m.size * 100) / 100, x: m.x, sx: Math.abs(m.sx - 1) < 0.02 ? 1 : clamp(m.sx, 0.6, 1.4) });
+    a.y = m.baseline - a.size * textBaseline(a);
+    const pad = Math.max(1, a.size * 0.12); const ink = { x: it.o[0], y: it.o[1] - it.fh * 0.92, w: it.width, h: it.fh * 1.16 };
+    cover = { x: ink.x - pad, y: ink.y - pad, w: ink.w + 2 * pad, h: ink.h + 2 * pad };
+  } else {
+    if (it.ocr) a.ocrOf = it.ocrKey;
+    if (pf?.std) a.font = pf.std;
+    if (pf?.family) a.pdfFont = pf.key; else if (pf) { a.bold = pf.bold; a.italic = pf.italic; }
+    a.y = it.o[1] - a.size * textBaseline(a);
+    // Keep the original line width: squeeze/stretch slightly if our rendering differs.
+    const mc = (convertItem.c ||= document.createElement('canvas').getContext('2d'));
+    mc.font = `${textItalic(a) ? 'italic ' : ''}${textBold(a) ? 'bold ' : ''}${a.size}px ${fontCss(a)}`; const natural = mc.measureText(text).width;
+    const sx = natural > 0 && it.width > 0 ? it.width / natural : 1; a.sx = Math.abs(sx - 1) < 0.02 ? 1 : clamp(sx, 0.6, 1.4);
+  }
+  const { fg, bg } = sampleColors(p, cover); a.color = fg;
+  S.annots.push({ id: uid(), pageId: p.id, type: 'whiteout', ...cover, ...(bg !== '#ffffff' ? { fill: bg } : {}) });
   S.annots.push(a); renderOverlay(p); renderTextLayer(p);
   startEdit(a.id, before, true);
 }
