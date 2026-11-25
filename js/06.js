@@ -217,7 +217,7 @@ function linesToBlocks(lines, body) {
 function ocrItems(p) {
   const words = S.ocr[`${p.srcId}:${p.index}`]; if (!words) return [];
   const cur = totalRot(p);
-  return words.map((w) => {
+  return words.map((w, k) => {
     const R = pageRectToDisp(p, { x: w.x, y: w.y, width: w.w, height: w.h });
     const delta = ((cur - w.r) % 360 + 360) % 360;
     let o, dir, up, fh, width;
@@ -225,7 +225,7 @@ function ocrItems(p) {
     else if (delta === 90) { fh = R.w / 1.16; o = [R.x + R.w - fh * 0.92, R.y]; dir = [0, 1]; up = [1, 0]; width = R.h; }
     else if (delta === 180) { fh = R.h / 1.16; o = [R.x + R.w, R.y + R.h - fh * 0.92]; dir = [-1, 0]; up = [0, 1]; width = R.w; }
     else { fh = R.w / 1.16; o = [R.x + fh * 0.92, R.y + R.h]; dir = [0, -1]; up = [-1, 0]; width = R.h; }
-    return { str: w.t + ' ', eol: false, o, dir, up, fh, width, fontName: null, family: 'sans-serif', ocr: true };
+    return { str: w.t + ' ', eol: true, o, dir, up, fh, width, fontName: null, family: 'sans-serif', ocr: true, ocrKey: `${p.srcId}:${p.index}#${k}` };
   });
 }
 function clearTextCache(p) { for (const k of [...textCache.keys()]) if (k.startsWith(`${p.srcId}:${p.index}:`)) { textCache.delete(k); textResolved.delete(k); } }
@@ -233,7 +233,9 @@ async function drawOcrLayer(pg, p, vp, getFont) {
   const words = S.ocr[`${p.srcId}:${p.index}`]; if (!words?.length) return;
   const f = await getFont('Helvetica'); const Hd = dispSize(vp).h;
   pg.pushOperators(L.pushGraphicsState(), L.concatTransformationMatrix(...matrixFor(vp)), L.setTextRenderingMode(L.TextRenderingMode.Invisible));
+  const replaced = new Set(S.annots.filter((a) => a.ocrOf).map((a) => a.ocrOf));
   for (const it of ocrItems(p)) {
+    if (replaced.has(it.ocrKey)) continue;
     const s = sanitize(f, it.str.trim()); if (!s) continue;
     const size = Math.max(1, it.fh); const nat = f.widthOfTextAtSize(s, size); if (!nat) continue;
     const ang = Math.round(Math.atan2(-it.dir[1], it.dir[0]) * 180 / Math.PI);
@@ -243,15 +245,38 @@ async function drawOcrLayer(pg, p, vp, getFont) {
   pg.pushOperators(L.setCharacterSqueeze(100), L.popGraphicsState());
 }
 const OCR_LANGS = [['eng', 'English'], ['fil', 'Filipino'], ['spa', 'Spanish'], ['fra', 'French'], ['deu', 'German'], ['ita', 'Italian'], ['por', 'Portuguese'], ['nld', 'Dutch'], ['ind', 'Indonesian'], ['vie', 'Vietnamese'], ['chi_sim', 'Chinese (Simplified)'], ['chi_tra', 'Chinese (Traditional)'], ['jpn', 'Japanese'], ['kor', 'Korean'], ['ara', 'Arabic'], ['hin', 'Hindi'], ['rus', 'Russian']];
+const SITE_URL = 'https://kristelle18.github.io/pdf-studio/';
+// Inside Claude's preview the page may not download files from other sites, and OCR needs its language data.
+async function ocrBlockedInClaude() {
+  if (!IN_CLAUDE) return false;
+  await modal({
+    title: 'Text recognition needs your website',
+    body: `<p style="margin-top:0;line-height:1.55">Recognizing text (OCR) downloads a language file the first time it runs. Claude's preview blocks that download, so OCR can't run here.</p>
+      <p style="line-height:1.55">Open the same editor on your website, where OCR works:<br><a href="${SITE_URL}" target="_blank" rel="noopener noreferrer">${SITE_URL}</a></p>`,
+    actions: [{ label: 'OK', primary: true, value: null }],
+  });
+  return true;
+}
+// Real, selectable text on a page (ignores OCR text and stray bits such as a page number or a stamp).
+async function pageTextChars(p) { return (await textItems(p)).filter((it) => !it.ocr).reduce((n, it) => n + it.str.replace(/\s+/g, '').length, 0); }
+// Does the page draw a picture (a scan or a flattened page is one big image)?
+async function pageHasImage(p) {
+  try {
+    const page = await S.sources.get(p.srcId).pdf.getPage(p.index + 1); const ops = await page.getOperatorList(); const O = pdfjsLib.OPS;
+    return ops.fnArray.some((f) => f === O.paintImageXObject || f === O.paintInlineImageXObject || f === O.paintImageXObjectRepeat);
+  } catch { return false; }
+}
+const hasOcr = (p) => !!S.ocr[`${p.srcId}:${p.index}`]?.length;
 async function ocrDialog() {
+  if (await ocrBlockedInClaude()) return;
   const saved = LS.get('pdfstudio.ocrLangs', ['eng']);
   const r = await modal({
-    title: 'OCR — make scanned pages searchable', wide: true,
-    body: `<p class="note" style="margin-top:0">Recognizes text in scanned or photographed pages and adds an invisible text layer, so you can search, select, copy and use Edit text. The first run downloads the OCR engine (a few MB).</p>
+    title: 'OCR — recognize text in scanned or flattened pages', wide: true,
+    body: `<p class="note" style="margin-top:0">Reads the text in scanned, photographed or flattened pages and adds a hidden text layer, so you can search, select, copy and use Edit text. The first run downloads the OCR engine (a few MB).</p>
       <label class="f">Languages in the document</label><div class="lang-grid">${OCR_LANGS.map(([c, n]) => `<label class="check"><input type="checkbox" value="${c}" ${saved.includes(c) ? 'checked' : ''}> ${n}</label>`).join('')}</div>
       <div class="row2"><label class="f">Pages (blank = all)<input type="text" id="ocrR" placeholder="e.g. 1-3, 5"></label>
-      <label class="f">Accuracy<select id="ocrQ"><option value="2.2">Standard (faster)</option><option value="3.2">High (slower, small text)</option></select></label></div>
-      <label class="check"><input type="checkbox" id="ocrSkip" checked> Skip pages that already contain text</label>`,
+      <label class="f">Accuracy<select id="ocrQ"><option value="3">High (recommended)</option><option value="2.2">Faster</option><option value="4">Highest (very small text)</option></select></label></div>
+      <label class="check"><input type="checkbox" id="ocrSkip"> Skip pages that already have plenty of selectable text</label>`,
     actions: [{ label: 'Cancel', value: null }, { label: 'Start OCR', primary: true, onClick: (m) => {
       const langs = [...m.querySelectorAll('.lang-grid input:checked')].map((i) => i.value); if (!langs.length) { toast('Pick at least one language.', true); return false; }
       let idx; try { idx = pagesFromRange(m.querySelector('#ocrR').value); } catch (e) { toast(e.message, true); return false; }
@@ -265,35 +290,76 @@ async function getTesseract() {
   if (!window.Tesseract) await loadScript(LOCAL_LIB ? LOCAL_LIB + 'tesseract/tesseract.min.js' : CDN + 'tesseract.js@5.1.1/dist/tesseract.min.js');
   return window.Tesseract;
 }
-async function runOcr({ langs, idx, scale, skip }) {
-  let worker; let done = 0, skipped = 0, words = 0; let cur = 0;
+// Tesseract result -> text lines (one editable line each), dropping words it is unsure of.
+function ocrLinesOf(data) {
+  let lines = data.lines;
+  if (!lines?.length) lines = (data.blocks || []).flatMap((b) => (b.paragraphs || []).flatMap((pa) => pa.lines || []));
+  return (lines || []).map((ln) => {
+    const words = (ln.words || []).filter((w) => w.text && w.text.trim() && w.confidence > 30);
+    if (!words.length) return null;
+    const b = { x0: Math.min(...words.map((w) => w.bbox.x0)), y0: Math.min(...words.map((w) => w.bbox.y0)), x1: Math.max(...words.map((w) => w.bbox.x1)), y1: Math.max(...words.map((w) => w.bbox.y1)) };
+    return { text: words.map((w) => w.text.trim()).join(' '), bbox: b };
+  }).filter(Boolean);
+}
+async function runOcr({ langs, idx, scale = 3, skip = false, quiet = false }) {
+  if (await ocrBlockedInClaude()) return false;
+  let worker; let done = 0, skipped = 0, lines = 0, empty = 0; let cur = 0;
   busy(true, 'Loading OCR engine…');
   try {
     const T = await getTesseract();
-    const opts = { logger: (m) => { if (m.status === 'recognizing text') busy(true, `Reading page ${cur} (${done + 1} of ${idx.length})… ${Math.round(m.progress * 100)}%`); else if (m.status && !done) busy(true, 'Loading OCR engine and language data…'); } };
+    const opts = { logger: (m) => { if (m.status === 'recognizing text') busy(true, `Reading page ${cur} (${done + 1} of ${idx.length})… ${Math.round(m.progress * 100)}%`); else if (m.status && !done) busy(true, 'Loading OCR engine and language data…'); }, errorHandler: (e) => console.warn('ocr', e) };
     if (LOCAL_LIB) Object.assign(opts, { workerPath: LOCAL_LIB + 'tesseract/worker.min.js', corePath: LOCAL_LIB + 'tesseract/', langPath: LOCAL_LIB + 'tesseract/lang' });
-    worker = await T.createWorker(langs.join('+'), 1, opts);
+    worker = await Promise.race([T.createWorker(langs.join('+'), 1, opts), new Promise((_, rej) => setTimeout(() => rej(new Error('the OCR engine took too long to download')), 120000))]);
+    await safe(() => worker.setParameters({ preserve_interword_spaces: '1' }), null);
     for (const i of idx) {
       const p = S.pages[i]; cur = i + 1;
-      if (skip && (await textItems(p)).some((it) => !it.ocr && it.str.trim())) { skipped++; done++; continue; }
+      if (skip && (await pageTextChars(p)) >= 40) { skipped++; done++; continue; }
       const page = await S.sources.get(p.srcId).pdf.getPage(p.index + 1);
-      const vp = page.getViewport({ scale, rotation: totalRot(p) });
+      let sc = scale; const vp0 = page.getViewport({ scale: 1, rotation: totalRot(p) });
+      sc = Math.min(sc, Math.sqrt(36e6 / (vp0.width * vp0.height))); // keep the image a sensible size
+      const vp = page.getViewport({ scale: sc, rotation: totalRot(p) });
       const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
       const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
       await page.render({ canvasContext: ctx, viewport: vp }).promise;
       const { data } = await worker.recognize(c);
-      const list = (data.words || []).filter((w) => w.text && w.text.trim() && w.confidence > 25).map((w) => {
-        const b = w.bbox; const a = dispToPage(p, b.x0 / scale, b.y0 / scale), z = dispToPage(p, b.x1 / scale, b.y1 / scale);
-        return { t: w.text.trim(), x: Math.min(a.x, z.x), y: Math.min(a.y, z.y), w: Math.abs(z.x - a.x), h: Math.abs(z.y - a.y), r: totalRot(p) };
+      const list = ocrLinesOf(data).map(({ text, bbox: b }) => {
+        const a = dispToPage(p, b.x0 / sc, b.y0 / sc), z = dispToPage(p, b.x1 / sc, b.y1 / sc);
+        return { t: text, x: Math.min(a.x, z.x), y: Math.min(a.y, z.y), w: Math.abs(z.x - a.x), h: Math.abs(z.y - a.y), r: totalRot(p) };
       });
-      S.ocr[`${p.srcId}:${p.index}`] = list; words += list.length; clearTextCache(p); done++;
+      S.ocr[`${p.srcId}:${p.index}`] = list; lines += list.length; if (!list.length) empty++; clearTextCache(p); done++;
     }
   } catch (e) {
     console.error(e); busy(false);
-    return toast((IN_CLAUDE ? 'OCR could not run inside Claude (' : 'OCR failed (') + (e?.message || e) + '). ' + (IN_CLAUDE ? 'Try it on your GitHub website.' : 'Check your internet connection and try again.'), true, 8000);
+    toast('OCR failed (' + (e?.message || e) + '). Check your internet connection and try again.', true, 8000);
+    return false;
   } finally { if (worker) safe(() => worker.terminate()); busy(false); }
   S.dirty = true; if (S.tool === 'edittext') S.pages.forEach(renderTextLayer);
-  toast(`OCR finished: ${words} words recognized on ${done - skipped} page${done - skipped === 1 ? '' : 's'}${skipped ? ` (${skipped} skipped — already had text)` : ''}. Search and Edit text now work on those pages.`, false, 7000);
+  if (search.q) runSearch(search.q);
+  const n = done - skipped;
+  if (!lines) toast(`No text was found on ${n === 1 ? 'that page' : 'those pages'}${skipped ? ` (${skipped} skipped — already had text)` : ''}. If the text is very small or blurry, try OCR again with “Highest” accuracy.`, true, 8000);
+  else if (!quiet) toast(`Text recognized: ${lines} line${lines === 1 ? '' : 's'} on ${n - empty} page${n - empty === 1 ? '' : 's'}${skipped ? ` (${skipped} skipped — already had text)` : ''}. Search, copy and Edit text now work there.`, false, 7000);
+  return lines > 0;
+}
+// Edit text on a page that is only an image (scanned or flattened): offer to recognize its text first.
+let ocrOffered = new Set();
+async function offerOcrForEdit() {
+  const p = S.pages[S.current]; if (!p || hasOcr(p) || ocrOffered.has(p.srcId)) return;
+  if ((await pageTextChars(p)) >= 40 || !(await pageHasImage(p))) return;
+  ocrOffered.add(p.srcId);
+  if (S.tool !== 'edittext') return;
+  if (await ocrBlockedInClaude()) return;
+  const pending = S.pages.filter((q) => !hasOcr(q));
+  const r = await modal({
+    title: 'Recognize the text first?',
+    body: `<p style="margin-top:0;line-height:1.55">This page is an image (scanned or flattened), so its words can't be edited yet. PDF Studio can read the text with OCR and then let you click any line to change it.</p>`,
+    actions: [{ label: 'Not now', value: null }, ...(pending.length > 1 ? [{ label: `All ${pending.length} pages`, value: 'all' }] : []), { label: 'This page', primary: true, value: 'one' }],
+  });
+  if (!r) return;
+  const idx = r === 'all' ? S.pages.map((q, i) => (hasOcr(q) ? -1 : i)).filter((i) => i >= 0) : [S.current];
+  if (await runOcr({ langs: LS.get('pdfstudio.ocrLangs', ['eng']), idx, scale: 3, skip: r === 'all', quiet: true })) {
+    if (S.tool !== 'edittext') setTool('edittext');
+    toast('Text recognized. Click any line to edit it.', false, 6000);
+  }
 }
 
 /* ------------------------------------------------------------------ links and outline (bookmarks) */
