@@ -112,7 +112,7 @@ const PROPS_FOR = {
 const HINTS = {
   select: 'Click an item to select it. Drag to move, use the corner handle to resize. Double-click text to edit. Fill form fields by clicking them.',
   hand: 'Drag to scroll around the document.', text: 'Click anywhere on a page to add text.',
-  edittext: 'Click on existing text to replace it. The original is covered and your editable copy appears on top.',
+  edittext: 'Click on existing text to replace it. Scanned or flattened page? Run OCR first (All tools → OCR) so its text can be edited.',
   highlight: 'Drag sideways along a line of text to highlight it. The stroke stays straight and snaps to the line; change thickness with Width.', draw: 'Draw freehand with your mouse, pen or finger.',
   rect: 'Drag to draw a box.', ellipse: 'Drag to draw a circle or ellipse.', line: 'Drag to draw a line.', arrow: 'Drag to draw an arrow.',
   note: 'Click to add a sticky-note comment.', date: "Click to insert today's date.",
@@ -162,7 +162,12 @@ function modal({ title, body, actions = [], wide = false, onOpen }) {
   return new Promise((res) => {
     modalResolve = res;
     m.querySelector('[data-close]').onclick = () => closeModal(null);
-    actions.forEach((a, i) => { m.querySelector(`[data-act="${i}"]`).onclick = async () => { const v = a.onClick ? await a.onClick(m) : a.value; if (v !== false) closeModal(v ?? a.value ?? true); }; });
+    actions.forEach((a, i) => { m.querySelector(`[data-act="${i}"]`).onclick = async () => {
+      let v;
+      if (a.onClick) { v = await a.onClick(m); if (v === false) return; if (v === undefined) v = true; } // false keeps the dialog open (e.g. invalid input)
+      else v = 'value' in a ? a.value : true; // Cancel buttons carry value: null / false
+      closeModal(v);
+    }; });
     onOpen && onOpen(m);
   });
 }
